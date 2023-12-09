@@ -14,7 +14,7 @@ defmodule TextServer.Workers.VersionWorker do
 
   defp parse(version) do
     # parse version, saving/updating TextNodes and TextElements
-    case Versions.parse_version(version) do
+    case TextServer.Ingestion.Version.parse_version(version) do
       {:ok, version} ->
         {:ok, version}
 
