@@ -1,8 +1,106 @@
 # New Alexandria Foundation Text Server
 
+## Getting Started
+
+So you've forked this repo, and you want to set up your own commentary. That's a reasonable approach, since we deliberately haven't enabled user accounts for this work.
+
+You'll need to create a [YAML](https://yaml.org/) file at the root of this repository called `commentary.yaml`. Example configuration has been provided in `example_commentary.yaml`.
+
+The top level of the YAML file supports the following keys:
+
+- `texts`: a list of `text` and/or `collection` objects to which your commentary refers.
+- `commentaries`: a list of `commentary` objects, pointing to the commentaries that you have written
+
+
+### `text` and `collection` objects
+
+`text` objects refer to the critical texts on which your commentary relies. These are the primary source materials to which each of your comments should refer. 
+
+You can refer to individual texts by pointing to a local file. You'll need to supply some information about the text to be ingested:
+
+```yaml
+texts:
+  - text:
+    - name: Periegesis
+      file: ./priv/texts/greekLit/tlg0525/tlg0525.tlg001.perseus-grc2.xml
+      urn: urn:cts:greekLit:tlg0525.tlg001.perseus-grc2
+```
+
+If you want to process entire collections, you can do so as follows:
+
+```yaml
+texts:
+  - collection:
+    - name: Canonical Greek Literature
+      repository: https://github.com/PerseusDL/canonical-greekLit/
+      urn: urn:cts:greekLit
+  - collection:
+    - name: Canonical Latin Literature
+      repository: https://github.com/PerseusDL/canonical-latinLit/
+      urn: urn:cts:latinLit
+```
+
+Instead of providing a `repository` attribute for a collection, you can provide a `dir` --- this way you can only pull in the files that you need, instead of an entire corpus.
+
+```yaml
+texts:
+  - collection:
+    - name: Canonical Greek Literature
+      dir: ./priv/texts/greekLit
+      urn: urn:cts:greekLit
+  - collection:
+    - name: Canonical Latin Literature
+      dir: ./priv/texts/latinLit
+      urn: urn:cts:latinLit
+```
+
+It is assumed that these repositories or directories will follow the [CapiTainS directory structure](http://capitains.org/pages/guidelines#directory-structure) --- they should have a `data` directory at the root of the repository, which can contain any number of subdirectories whose names should match the `textgroup`s to which they refer. 
+
+Each `textgroup` subdirectory should contain a `__cts__.xml` [Textgroup Metadata File](http://capitains.org/pages/guidelines#textgroup-metadata-file) and any number of subdirectories referring to works within that textgroup.
+
+Each `work` subdirectory should contain a `__cts__.xml` [Work Metadata File](http://capitains.org/pages/guidelines#work-metadata-file) detailing all of the TEI XML `version`s (editions, translations, and commentaries) of the given `work` that should be processed.
+
+You can mix and match as needed:
+
+```yaml
+texts:
+  - text:
+    - name: Iliad
+      file: ./priv/texts/greekLit/tlg0012/tlg0012.tlg001.perseus-grc2.xml
+      urn: urn:cts:greekLit:tlg0012.tlg001.perseus-grc2
+  - collection:
+    - name: Canonical Latin Literature
+      dir: ./priv/texts/latinLit
+      urn: urn:cts:latinLit
+```
+
+
+### `commentary` objects
+
+Like a `text` object, a `commentary` object should point to a file and provide some additional information. At present, Open Commentaries should be able to handle commentaries in docx, markdown, and TEI XML. ("Should" because this is still very much beta software.)
+
+Theoretically, we should be able to support any format that can be transformed into Pandoc's [AST](https://pandoc.org/using-the-pandoc-api.html), but for now we are aiming for full support of docx, markdown, and the subset of TEI commonly used for Perseus texts (which happens mostly to look like [EpiDoc](https://epidoc.stoa.org/)).
+
+A `commentaries` element in the `yaml` might look like the following:
+
+```yaml
+commentaries:
+  - commentary:
+    - name: A Pausanias Commentary in Progress
+      file: ./priv/commentaries/greekLit/tlg0525/tlg0525.tlg001.aprip-en.docx
+      urn: urn:cts:greekLit:tlg0525.tlg001.aprip-en
+      references: urn:cts:greekLit:tlg0525.tlg001.perseus-grc2
+```
+
+Note the `references` element: this can be either a string or a list of strings that contain the CTS URNs of the editions or translations to which your commentary refers.
+
+Although the [CTS specification](https://www.degruyter.com/document/doi/10.1515/9783110599572-007/html?lang=en) treats a `commentary` as a child of a `work` (with potential `translation` and `edition` siblings), this was probably a mistake. Commentaries need to refer to specific `edition` versions of a text in order to properly resolve citations.
+
+Any `references` that you provide should contain valid nodes for any citations in your commentary. This means that if you have a gloss on, e.g., _Agamemnon_ v. 288, you should be sure that v. 288 is valid for your gloss in any of the versions of `tlg0085.tlg005` that you cite.
+
 ## Development
 
-For now, enable S3 uploads by proxyin the MinIO server with `fly proxy 9000`.
+For now, enable S3 uploads by proxying the MinIO server with `fly proxy 9000`.
 
 ## What are we doing?
 

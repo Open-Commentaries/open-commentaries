@@ -26,6 +26,24 @@ export const DragHook = {
 	}
 };
 
+export const DropboxChooserHook = {
+	async mounted() {
+		var button = Dropbox.createChooseButton(this.options());
+		document.getElementById("dropbox-chooser-container").appendChild(button);
+	},
+
+	options() {
+		return {
+			success(files) {
+				console.log(files);
+			},
+			linkType: 'direct',
+			multiselect: false,
+			extensions: ['.docx'],
+		}
+	}
+}
+
 export async function transformTei(raw) {
 	if (!raw) {
 		return Promise.resolve('');
@@ -54,5 +72,6 @@ export const TEIHook = {
 
 export default {
 	DragHook,
+	DropboxChooserHook,
 	TEIHook,
 };

@@ -25,10 +25,15 @@ defmodule TextServerWeb.Router do
     get "/versions/:id/download", VersionController, :download
   end
 
+  # TODO: Better handling of user uploads. This is not
+  # an immediate goal: we can accomplish far more by
+  # having admins fork the repository and tell it what
+  # files to ingest.
   scope "/", TextServerWeb do
     pipe_through [:browser, :require_authenticated_user]
 
-    live_session :with_authenticated_user, on_mount: [{TextServerWeb.UserAuth, :ensure_authenticated}] do
+    live_session :with_authenticated_user,
+      on_mount: [{TextServerWeb.UserAuth, :ensure_authenticated}] do
       live "/collections/new", CollectionLive.Index, :new
       live "/collections/:id/edit", CollectionLive.Index, :edit
       live "/collections/:id/show/edit", CollectionLive.Show, :edit
@@ -45,7 +50,7 @@ defmodule TextServerWeb.Router do
       live "/text_nodes/:id/edit", TextNodeLive.Index, :edit
       live "/text_nodes/:id/show/edit", TextNodeLive.Show, :edit
 
-      live "/versions/:id/edit", VersionLive.Index, :edit
+      live "/versions/:id/edit", VersionLive.Edit, :edit
       live "/versions/:id/show/edit", VersionLive.Show, :edit
 
       live "/works/new", WorkLive.New, :new
@@ -62,7 +67,7 @@ defmodule TextServerWeb.Router do
   scope "/", TextServerWeb do
     pipe_through [:browser, :require_authenticated_user, :require_project_admin]
 
-    live_session :project_with_admin, on_mount: [{TextServerWeb.UserAuth, :mount_current_user}]  do
+    live_session :project_with_admin, on_mount: [{TextServerWeb.UserAuth, :mount_current_user}] do
       live "/projects/:project_id/edit", ProjectLive.Edit, :edit
     end
   end
