@@ -4,13 +4,13 @@
 
 So you've forked this repo, and you want to set up your own commentary. That's a reasonable approach, since we deliberately haven't enabled user accounts for this work.
 
-You'll need to create a [YAML](https://yaml.org/) file at the root of this repository called `commentary.yaml`. Example configuration has been provided in `example_commentary.yaml`.
+You'll need to create a [TOML](https://toml.io/) file at the root of this repository called `commentary.toml`. Example configuration has been provided in `example_commentary.toml`.
 
-The top level of the YAML file supports the following keys:
+The top level of the TOML file supports the following keys:
 
-- `texts`: a list of `text` and/or `collection` objects to which your commentary refers.
+- `editions`: a list of `text` and/or `collection` objects to which your commentary refers
 - `commentaries`: a list of `commentary` objects, pointing to the commentaries that you have written
-
+- `translations`: a list of `translation` objects, pointing to translations that you have written
 
 ### `text` and `collection` objects
 
@@ -18,43 +18,30 @@ The top level of the YAML file supports the following keys:
 
 You can refer to individual texts by pointing to a local file. You'll need to supply some information about the text to be ingested:
 
-```yaml
-texts:
-  - text:
-    - name: Periegesis
-      file: ./priv/texts/greekLit/tlg0525/tlg0525.tlg001.perseus-grc2.xml
-      urn: urn:cts:greekLit:tlg0525.tlg001.perseus-grc2
+```toml
+[[editions]]
+name = "Periegesis"
+file = "./priv/texts/greekLit/tlg0525/tlg0525.tlg001.perseus-grc2.xml"
+urn = "urn:cts:greekLit:tlg0525.tlg001.perseus-grc2"
 ```
 
-If you want to process entire collections, you can do so as follows:
+Instead of providing a `file` attribute, you can provide a `repository` or a `dir` attribute when you want to process entire collections:
 
-```yaml
-texts:
-  - collection:
-    - name: Canonical Greek Literature
-      repository: https://github.com/PerseusDL/canonical-greekLit/
-      urn: urn:cts:greekLit
-  - collection:
-    - name: Canonical Latin Literature
-      repository: https://github.com/PerseusDL/canonical-latinLit/
-      urn: urn:cts:latinLit
+```toml
+[[editions]]
+name = "Canonical Greek Literature"
+repository = "https://github.com/PerseusDL/canonical-greekLit/"
+urn = "urn:cts:greekLit"
+
+[[editions]]
+name = "Canonical Latin Literature"
+dir = "./priv/texts/PerseusDL/canonical-latinLit/"
+urn = "urn:cts:latinLit"
 ```
 
-Instead of providing a `repository` attribute for a collection, you can provide a `dir` --- this way you can only pull in the files that you need, instead of an entire corpus.
+The main difference is that using the `repository` attribute will pull in every valid file found in the repository; the `dir` attribute allows you to curate the collection locally before parsing, so you only pull in the documents that you need.
 
-```yaml
-texts:
-  - collection:
-    - name: Canonical Greek Literature
-      dir: ./priv/texts/greekLit
-      urn: urn:cts:greekLit
-  - collection:
-    - name: Canonical Latin Literature
-      dir: ./priv/texts/latinLit
-      urn: urn:cts:latinLit
-```
-
-It is assumed that these repositories or directories will follow the [CapiTainS directory structure](http://capitains.org/pages/guidelines#directory-structure) --- they should have a `data` directory at the root of the repository, which can contain any number of subdirectories whose names should match the `textgroup`s to which they refer. 
+In both cases, it is assumed that these repositories or directories will follow the [CapiTainS directory structure](http://capitains.org/pages/guidelines#directory-structure) --- they should have a `data` directory at the root of the repository, which can contain any number of subdirectories whose names should match the `textgroup`s to which they refer. 
 
 Each `textgroup` subdirectory should contain a `__cts__.xml` [Textgroup Metadata File](http://capitains.org/pages/guidelines#textgroup-metadata-file) and any number of subdirectories referring to works within that textgroup.
 
@@ -62,18 +49,17 @@ Each `work` subdirectory should contain a `__cts__.xml` [Work Metadata File](htt
 
 You can mix and match as needed:
 
-```yaml
-texts:
-  - text:
-    - name: Iliad
-      file: ./priv/texts/greekLit/tlg0012/tlg0012.tlg001.perseus-grc2.xml
-      urn: urn:cts:greekLit:tlg0012.tlg001.perseus-grc2
-  - collection:
-    - name: Canonical Latin Literature
-      dir: ./priv/texts/latinLit
-      urn: urn:cts:latinLit
-```
+```toml
+[[texts]]
+name = "Iliad"
+file = "./priv/texts/greekLit/tlg0012/tlg0012.tlg001.perseus-grc2.xml"
+urn = "urn:cts:greekLit:tlg0012.tlg001.perseus-grc2"
 
+[[texts]]
+name = "Canonical Latin Literature"
+dir = "./priv/texts/latinLit"
+urn = "urn:cts:latinLit"
+```
 
 ### `commentary` objects
 
@@ -81,22 +67,37 @@ Like a `text` object, a `commentary` object should point to a file and provide s
 
 Theoretically, we should be able to support any format that can be transformed into Pandoc's [AST](https://pandoc.org/using-the-pandoc-api.html), but for now we are aiming for full support of docx, markdown, and the subset of TEI commonly used for Perseus texts (which happens mostly to look like [EpiDoc](https://epidoc.stoa.org/)).
 
-A `commentaries` element in the `yaml` might look like the following:
+A `commentaries` array in the `commentary.toml` might look like the following:
 
-```yaml
-commentaries:
-  - commentary:
-    - name: A Pausanias Commentary in Progress
-      file: ./priv/commentaries/greekLit/tlg0525/tlg0525.tlg001.aprip-en.docx
-      urn: urn:cts:greekLit:tlg0525.tlg001.aprip-en
-      references: urn:cts:greekLit:tlg0525.tlg001.perseus-grc2
+```toml
+[[commentaries]]
+name = "A Pausanias Commentary in Progress"
+file = "./priv/commentaries/tlg0525.tlg001.apcip-en.docx"
+urn = "urn:cts:greekLit:tlg0525.tlg001.apcip-en"
+
+[[commentaries.references]]
+urn = "urn:cts:greekLit:tlg0525.tlg001.perseus-grc2"
+
+[[commentaries.references]]
+unr = "urn:cts:greekLit:tlg0525.tlg001.perseus-eng2"
 ```
 
-Note the `references` element: this can be either a string or a list of strings that contain the CTS URNs of the editions or translations to which your commentary refers.
+Note the `references` attribute: each item in the `commentaries` array can have any number of items in its `references` sub-array, each of which has a `urn` pointing to a valid edition or translation.
 
 Although the [CTS specification](https://www.degruyter.com/document/doi/10.1515/9783110599572-007/html?lang=en) treats a `commentary` as a child of a `work` (with potential `translation` and `edition` siblings), this was probably a mistake. Commentaries need to refer to specific `edition` versions of a text in order to properly resolve citations.
 
 Any `references` that you provide should contain valid nodes for any citations in your commentary. This means that if you have a gloss on, e.g., _Agamemnon_ v. 288, you should be sure that v. 288 is valid for your gloss in any of the versions of `tlg0085.tlg005` that you cite.
+
+### `translation` objects
+
+Like `commentaries`, `translations` should reference the `edition` on which they are based. (If you do not know or if the information is not available, it might be best for now to treat the `translation` as another `edition` that happens to be in a different language than the original. This workaround is a consequence of the overloading of the `version` level of the CTS URN.)
+
+```toml
+[[translations]]
+name = "A Pausanias Reader in Progress"
+file = "./priv/translations/tlg0525.tlg001.aprip-en.docx"
+urn = "urn:cts:greekLit:tlg0525.tlg001.aprip-en"
+```
 
 ## Development
 
