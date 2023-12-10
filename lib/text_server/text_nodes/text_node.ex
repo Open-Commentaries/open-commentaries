@@ -7,6 +7,7 @@ defmodule TextServer.TextNodes.TextNode do
     # be an array of strings, not integers. Consider citations for
     # Plato, Aristotle, etc.
     field :location, {:array, :integer}
+    field :node_type, Ecto.Enum, values: [:bullet_list, :div, :para]
     field :normalized_text, :string
     field :text, :string
     field :urn, TextServer.Ecto.Types.CTS_URN
@@ -14,6 +15,7 @@ defmodule TextServer.TextNodes.TextNode do
 
     field :graphemes_with_tags, :any, virtual: true
 
+    belongs_to :text_container, TextServer.TextContainers.TextContainer
     belongs_to :version, TextServer.Versions.Version
 
     has_many :text_elements, TextServer.TextElements.TextElement,
@@ -28,9 +30,10 @@ defmodule TextServer.TextNodes.TextNode do
   @doc false
   def changeset(text_node, attrs) do
     text_node
-    |> cast(attrs, [:version_id, :location, :text, :urn])
+    |> cast(attrs, [:version_id, :location, :text, :urn, :text_container_id])
     |> validate_required([:location, :text, :urn])
     |> assoc_constraint(:version)
+    |> assoc_constraint(:text_container)
     |> unique_constraint([:version_id, :location, :urn])
   end
 

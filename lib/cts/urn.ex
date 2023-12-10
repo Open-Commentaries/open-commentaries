@@ -153,6 +153,24 @@ defmodule CTS.URN do
     }
   end
 
+  def version_urn(%CTS.URN{} = urn) do
+    parse(
+      "#{urn.prefix}:#{urn.protocol}:#{urn.namespace}:#{urn.text_group}.#{urn.work}.#{urn.version}"
+    )
+  end
+
+  def version_urn(urn) when is_binary(urn) do
+    version_urn(parse(urn))
+  end
+
+  def work_urn(%CTS.URN{} = urn) do
+    parse("#{urn.prefix}:#{urn.protocol}:#{urn.namespace}:#{urn.text_group}.#{urn.work}")
+  end
+
+  def work_urn(urn) when is_binary(urn) do
+    work_urn(parse(urn))
+  end
+
   defp parse_work(nil), do: {:ok, nil}
 
   defp parse_work(string) when is_binary(string), do: {:ok, String.split(string, ".")}
