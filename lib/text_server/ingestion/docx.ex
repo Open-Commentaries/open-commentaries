@@ -41,110 +41,61 @@ defmodule TextServer.Ingestion.Docx do
   # directly from a comment's XML.
   @attribution_regex ~r/\[\[GN\s(\d{4}\.\d{2}\.\d{2})\]\]/
 
-  alias TextServer.TextContainers
-  alias TextServer.TextElements
-  alias TextServer.TextNodes
-  alias TextServer.Versions
-  alias TextServer.Works
-
   @doc """
   Using the `from: {:docx, [:styles]}` option lets us
   maintain custom user-defined styles under the "custom-style"
   key in `node.attr.key_value_pairs`.
 
-  The `Panpipe.AST.Div` objects that are returned by parse/1
-  are efectively `TextContainer`s. Each container holds
-  the location of all of its child nodes.
-
-  We need to figure out how to store the child nodes
-  so that they can be re-assembled into HTML
-  with the correct format and so that we can attach
-  other elements (named entity tags etc.) to them.
+  We transform the AST by prepending H2 nodes to
+  every location string that we encounter and wrapping
+  ever Str node in a Span with its citation fragment
+  (based on the current location, which we clumsily
+  store in `Process`).
   """
-  def parse(
-        %{
-          "file" => filename,
-          "name" => name,
-          "urn" => urn
-        },
-        version_type
-      ) do
+  def parse_and_chunk(%{
+        "file" => filename,
+        "urn" => urn
+      }) do
     {:ok, ast} =
       Panpipe.ast(
         input: filename,
         from: {:docx, [:styles]},
         extract_media: Path.dirname(filename) <> "/media/" <> urn,
-        track_changes: "accept"
+        track_changes: "all"
       )
 
-    Process.put(:current_document_location, ["preface"])
-
-    work_urn = CTS.URN.work_urn(urn)
-    {:ok, work} = Works.get_work_by_urn(work_urn)
-
-    md5 = :crypto.hash(:md5, File.read!(filename)) |> Base.encode16(case: :lower)
-
-    {:ok, version} =
-      Versions.find_or_create_version(%{
-        filename: filename,
-        filemd5hash: md5,
-        work_id: work.id,
-        label: name,
-        urn: urn,
-        version_type: version_type
-      })
-
     ast
-    |> Panpipe.transform(&mark_location/1)
-    |> Enum.filter(fn node ->
-      match?(%Panpipe.AST.Div{}, node)
+    |> Panpipe.transform(&add_location_markers/1)
+    |> Map.get(:children)
+    |> Enum.reduce([[]], fn node, acc ->
+      [curr | rest] = acc
+
+      case node do
+        %Panpipe.AST.Div{children: children} ->
+          first = List.first(children)
+
+          # If there is a new location node, reverse the current chunk
+          # (so that the nodes are in the right order) and
+          # start a new chunk with the current node.
+          if match?(%Panpipe.AST.Header{attr: %Panpipe.AST.Attr{identifier: _location}}, first) do
+            acc = [Enum.reverse(curr) | rest]
+
+            [[node] | acc]
+          else
+            # Otherwise, prepend the current node to the current chunk.
+            [[node | curr] | rest]
+          end
+
+        _ ->
+          # Otherwise, prepend the current node to the current chunk.
+          [[node | curr] | rest]
+      end
     end)
-    |> Enum.map(&Map.delete(&1, :parent))
-    |> Enum.chunk_by(fn node ->
-      Map.get(node, :attr) |> Map.get(:identifier)
-    end)
-    |> Enum.with_index()
-    |> Enum.map(fn {chunk, offset} ->
-      first = List.first(chunk)
-      location = Map.get(first, :attr) |> Map.get(:identifier, "preface")
-
-      urn =
-        if location == [0] do
-          "#{version.urn}:preface"
-        else
-          "#{version.urn}:#{location}"
-        end
-
-      {:ok, container} =
-        TextContainers.find_or_create_text_container(%{
-          location: location |> Enum.map(&to_string(&1)),
-          offset: offset,
-          version_id: version.id,
-          urn: urn
-        })
-
-      chunk
-      |> Enum.map(fn text_node_raw ->
-        node_type =
-          Map.get(text_node_raw, :attr)
-          |> Map.get(:key_value_pairs)
-          |> Map.get("block_type")
-          |> Module.split()
-          |> List.last()
-          |> Recase.KebabCase.convert()
-
-        text_node_raw
-        |> Map.put(:text_container_id, container.id)
-        |> Map.put(:node_type, node_type)
-        |> IO.inspect()
-
-        # |> TextNodes.find_or_create_text_node()
-      end)
-    end)
+    |> Enum.reverse()
   end
 
-  def mark_location(%Panpipe.AST.Para{children: children} = n) do
-    [h | _rest] = children
+  def add_location_markers(%Panpipe.AST.Para{children: children} = n) do
+    [h | rest] = children
 
     case h do
       %Panpipe.AST.Str{string: string} ->
@@ -155,38 +106,49 @@ defmodule TextServer.Ingestion.Docx do
             List.first(matches)
             |> String.replace("{", "")
             |> String.replace("}", "")
-            |> String.split(".")
 
-          Process.put(:current_document_location, location)
+          Process.put(:current_location, location)
+
+          [
+            location_block(string),
+            %{n | children: rest}
+          ]
         end
 
       _ ->
         nil
     end
-
-    wrap_children_in_div(children, n.__struct__)
   end
 
-  def mark_location(n) do
-    if Panpipe.AST.Node.block?(n) do
-      wrap_children_in_div(n.children, n.__struct__)
+  def add_location_markers(%Panpipe.AST.Str{string: " "}), do: nil
+
+  def add_location_markers(%Panpipe.AST.Str{string: string} = n) do
+    location = Process.get(:current_location)
+
+    unless is_nil(location) do
+      citation_key = "#{location}:#{string}"
+
+      # Somewhat confusingly, the :halt tuple does not halt
+      # the transformation, but rather prevents it from recursing
+      # into the :children field, which is the Str node that it
+      # has just seen.
+      {:halt,
+       %Panpipe.AST.Span{
+         attr: %Panpipe.AST.Attr{key_value_pairs: %{"citation" => citation_key}},
+         children: [n]
+       }}
     end
   end
 
-  @doc """
-  Keeping the `parent_type` is not terrible for getting the `location`
-  identifiers attached to each node.
-  """
-  def wrap_children_in_div(children, parent_type) do
-    div = %Panpipe.AST.Div{children: children}
-    location = Process.get(:current_document_location)
+  def add_location_markers(_n), do: nil
 
-    %{
-      div
-      | attr: %Panpipe.AST.Attr{
-          identifier: location,
-          key_value_pairs: %{"location" => location, "block_type" => parent_type}
-        }
+  defp location_block(string) do
+    location = Process.get(:current_location, ["front-matter"])
+
+    %Panpipe.AST.Header{
+      attr: %Panpipe.AST.Attr{identifier: location},
+      children: [%Panpipe.AST.Str{string: string}],
+      level: 2
     }
   end
 end

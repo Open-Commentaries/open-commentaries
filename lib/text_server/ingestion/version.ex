@@ -417,6 +417,10 @@ defmodule TextServer.Ingestion.Version do
     {:link, collect_fragments(fragment), Map.fetch!(fragment, :target)}
   end
 
+  def handle_fragment(%Panpipe.AST.ListElement{} = fragment) do
+    {:list_element, %{content: collect_fragments(fragment)}}
+  end
+
   def handle_fragment(%Panpipe.AST.Note{} = fragment),
     do: {:note, collect_fragments(fragment)}
 
