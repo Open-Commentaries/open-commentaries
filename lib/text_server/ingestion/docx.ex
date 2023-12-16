@@ -41,6 +41,34 @@ defmodule TextServer.Ingestion.Docx do
   # directly from a comment's XML.
   @attribution_regex ~r/\[\[GN\s(\d{4}\.\d{2}\.\d{2})\]\]/
 
+  defmodule TextContainer do
+    defstruct [:location, :urn, :offset]
+  end
+
+  defmodule TextBlock do
+    defstruct [:type, :text_container_ref, :offset]
+  end
+
+  defmodule TextNode do
+    defstruct [:type, :text_block_ref, :raw_contents, :offset]
+  end
+
+  defmodule TextToken do
+    defstruct [:text_node_ref, :content, :offset]
+  end
+
+  defmodule TextDecoration do
+    defstruct [:type, :text_token_range_ref]
+  end
+
+  defmodule CommentStart do
+    defstruct [:text_token_ref, :comment_id, :content]
+  end
+
+  defmodule CommentEnd do
+    defstruct [:text_token_ref, :comment_id]
+  end
+
   @doc """
   Using the `from: {:docx, [:styles]}` option lets us
   maintain custom user-defined styles under the "custom-style"
@@ -65,33 +93,60 @@ defmodule TextServer.Ingestion.Docx do
       )
 
     ast
-    |> Panpipe.transform(&add_location_markers/1)
-    |> Map.get(:children)
-    |> Enum.reduce([[]], fn node, acc ->
-      [curr | rest] = acc
+    |> Enum.with_index()
+    |> Enum.reduce(
+      %{
+        text_containers: [],
+        text_block: [],
+        text_nodes: [],
+        text_tokens: [],
+        text_decorations: [],
+        comments: []
+      },
+      &reducer/2
+    )
 
-      case node do
-        %Panpipe.AST.Div{children: children} ->
-          first = List.first(children)
+    # |> Panpipe.transform(&add_location_markers/1)
+    # |> Map.get(:children)
+    # |> Enum.reduce([[]], fn node, acc ->
+    #   [curr | rest] = acc
 
-          # If there is a new location node, reverse the current chunk
-          # (so that the nodes are in the right order) and
-          # start a new chunk with the current node.
-          if match?(%Panpipe.AST.Header{attr: %Panpipe.AST.Attr{identifier: _location}}, first) do
-            acc = [Enum.reverse(curr) | rest]
+    #   case node do
+    #     %Panpipe.AST.Div{children: children} ->
+    #       first = List.first(children)
 
-            [[node] | acc]
-          else
-            # Otherwise, prepend the current node to the current chunk.
-            [[node | curr] | rest]
-          end
+    #       # If there is a new location node, reverse the current chunk
+    #       # (so that the nodes are in the right order) and
+    #       # start a new chunk with the current node.
+    #       if match?(%Panpipe.AST.Header{attr: %Panpipe.AST.Attr{identifier: _location}}, first) do
+    #         acc = [Enum.reverse(curr) | rest]
 
-        _ ->
-          # Otherwise, prepend the current node to the current chunk.
-          [[node | curr] | rest]
-      end
-    end)
-    |> Enum.reverse()
+    #         [[node] | acc]
+    #       else
+    #         # Otherwise, prepend the current node to the current chunk.
+    #         [[node | curr] | rest]
+    #       end
+
+    #     _ ->
+    #       # Otherwise, prepend the current node to the current chunk.
+    #       [[node | curr] | rest]
+    #   end
+    # end)
+    # |> Enum.reverse()
+  end
+
+  def reducer({%Panpipe.AST.Plain{} = node, offset}, acc) do
+    current_container = acc.text_containers |> List.first()
+
+    my_text_block = %TextBlock{
+      text_container_ref: current_container.urn,
+      offset: offset,
+      type: "plain"
+    }
+  end
+
+  def reducer({node, offset}, acc) do
+    %{acc | text_nodes: [node | acc.text_nodes]}
   end
 
   def add_location_markers(%Panpipe.AST.Para{children: children} = n) do

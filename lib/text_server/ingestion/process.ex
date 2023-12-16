@@ -25,7 +25,7 @@ defmodule TextServer.Ingestion.Process do
 
       parsed =
         case Path.extname(file) do
-          ".docx" -> TextServer.Ingestion.Docx.parse_and_chunk(config)
+          ".docx" -> TextServer.Ingestion.Version.parse_version(version)
           ".xml" -> "NOT YET IMPLEMENTED"
           _ -> "NOT SUPPORTED"
         end

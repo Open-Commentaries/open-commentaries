@@ -64,7 +64,6 @@ defmodule TextServer.Ingestion.Version do
 
     nodes =
       joined_fragments
-      |> Enum.filter(fn {_location, text, _els} -> String.trim(text) != "" end)
       |> Enum.map(fn {location, text, elements} ->
         {:ok, text_node} =
           TextNodes.find_or_create_text_node(%{
@@ -104,7 +103,7 @@ defmodule TextServer.Ingestion.Version do
     current_fragments = Map.get(grouped_frags, loc, [])
 
     # As far as I can tell, the call to List.flatten/1, although
-    # it seems redundant, is necessary to esnure that we can
+    # it seems redundant, is necessary to ensure that we can
     # concatenate the lists successfully.
     updated_frags = current_fragments ++ List.flatten([frags])
 
@@ -136,15 +135,12 @@ defmodule TextServer.Ingestion.Version do
 
   # FIXME: This is a cludge for handling bulleted lists -- it won't
   # end up displaying the lists correctly.
-  def set_location(prev_location, non_list) do
-    [prev_location | [flatten_string(non_list)]]
+  def set_location(prev_location, {:bullet_list, list}) do
+    [prev_location | list]
   end
 
   def get_maybe_location_string(fragment) do
     case fragment do
-      [string: string] ->
-        string
-
       {:string, string} ->
         string
 
@@ -165,9 +161,7 @@ defmodule TextServer.Ingestion.Version do
   end
 
   @doc """
-  FIXME: (charles) There are some bugs with this approach,
-  and it's a bit suboptimal for the ways that it reinvents
-  the wheel.
+  FIXME: (charles)
 
   Bugs:
   - bullet_lists are not handled properly
@@ -176,7 +170,9 @@ defmodule TextServer.Ingestion.Version do
   For examples, see especially Pausanias 5.10
   """
   def serialize_fragments(location, fragments) do
-    text = fragments |> Enum.reduce("", &flatten_string/2)
+    text =
+      fragments
+      |> Enum.reduce("", &flatten_string/2)
 
     # if getting the location has left the node starting with a single space,
     # pop that element off the node entirely. This helps to avoid off-by-one
@@ -201,16 +197,42 @@ defmodule TextServer.Ingestion.Version do
   def flatten_string(fragment, string \\ "") do
     s =
       case fragment do
-        [string: text] -> text
-        {:string, text} -> text
-        {:link, fragments, _url} -> Enum.reduce(fragments, "", &flatten_string/2)
-        {:note, _} -> nil
-        {:comment, _} -> nil
-        {:change, _} -> nil
-        {:image, _} -> nil
-        {:span, _} -> nil
-        {_k, v} when not is_binary(v) -> Enum.reduce(v, "", &flatten_string/2)
-        _ -> nil
+        {:string, text} ->
+          text
+
+        {:bullet_list, list_elements} ->
+          Enum.reduce(list_elements, "", &flatten_string/2)
+
+        {:link, fragments, _url} ->
+          Enum.reduce(fragments, "", &flatten_string/2)
+
+        {:list_element, fragments} ->
+          Enum.reduce(fragments, "", &flatten_string/2)
+
+        {:note, _} ->
+          nil
+
+        {:comment, _} ->
+          nil
+
+        {:change, change} ->
+          classes = change |> Map.get(:attributes) |> Map.get(:classes)
+
+          if Enum.member?(classes, "insertion") do
+            Enum.reduce(change, "", &flatten_string/2)
+          end
+
+        {:image, _} ->
+          nil
+
+        {:span, _} ->
+          nil
+
+        {_k, v} when not is_binary(v) ->
+          Enum.reduce(v, "", &flatten_string/2)
+
+        _ ->
+          nil
       end
 
     "#{string}#{s}"
@@ -295,6 +317,21 @@ defmodule TextServer.Ingestion.Version do
            end_offset: end_offset,
            start_offset: offset,
            type: :link
+         }
+       ], end_offset}
+  end
+
+  def tag_elements({:list_element, content}, {elements, offset}) do
+    s = content |> Enum.reduce("", &flatten_string/2)
+    end_offset = offset + String.length(s)
+
+    {elements ++
+       [
+         %{
+           content: s,
+           end_offset: end_offset,
+           start_offset: offset,
+           type: :list_element
          }
        ], end_offset}
   end
@@ -403,7 +440,7 @@ defmodule TextServer.Ingestion.Version do
   end
 
   def handle_fragment(%Panpipe.AST.BulletList{} = fragment) do
-    {:bullet_list, %{content: collect_fragments(fragment)}}
+    {:bullet_list, collect_fragments(fragment)}
   end
 
   def handle_fragment(%Panpipe.AST.Emph{} = fragment),
@@ -418,7 +455,7 @@ defmodule TextServer.Ingestion.Version do
   end
 
   def handle_fragment(%Panpipe.AST.ListElement{} = fragment) do
-    {:list_element, %{content: collect_fragments(fragment)}}
+    {:list_element, collect_fragments(fragment)}
   end
 
   def handle_fragment(%Panpipe.AST.Note{} = fragment),
