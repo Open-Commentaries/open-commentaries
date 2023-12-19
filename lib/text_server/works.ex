@@ -63,7 +63,10 @@ defmodule TextServer.Works do
   def get_work(id), do: Repo.get(Work, id)
 
   def get_work_by_urn("urn:cts:" <> _rest = urn) when is_binary(urn) do
-    Work |> where([w], w.urn == ^urn) |> Repo.one()
+    case Work |> where([w], w.urn == ^urn) |> Repo.one() do
+      nil -> {:error, urn}
+      work -> {:ok, work}
+    end
   end
 
   def get_work_by_urn(urn) when is_binary(urn) do
@@ -71,7 +74,10 @@ defmodule TextServer.Works do
   end
 
   def get_work_by_urn(%CTS.URN{} = urn) do
-    Work |> where([w], w.urn == ^urn) |> Repo.one()
+    case Work |> where([w], w.urn == ^urn) |> Repo.one() do
+      nil -> {:error, urn}
+      work -> {:ok, work}
+    end
   end
 
   def get_work_cts_data(%Work{} = work) do

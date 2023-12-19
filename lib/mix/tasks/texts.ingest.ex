@@ -14,7 +14,8 @@ defmodule Mix.Tasks.Texts.Ingest do
 
     Mix.shell().info("... Ingesting repositories ... \n")
 
-    TextServer.Texts.ingest_repos()
+    # [_task_name | collections] = System.argv()
+    # TextServer.Ingestion.Versions.create_versions(collections)
 
     Mix.shell().info("... Finished ingesting repositories ... ")
   end

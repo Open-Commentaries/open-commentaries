@@ -1,0 +1,23 @@
+[[editions]]
+name = "Periegesis"
+file = "./priv/texts/PerseusDL/greekLit/tlg0525/tlg0525.tlg001.perseus-grc2.xml"
+urn = "urn:cts:greekLit:tlg0525.tlg001.perseus-grc2"
+
+[[commentaries]]
+name = "A Pausanias Commentary in Progress"
+file = "./priv/commentaries/apcip.docx"
+urn = "urn:cts:greekLit:tlg0525.tlg001.apcip-en"
+
+[[commentaries.references]]
+urn = "urn:cts:greekLit:tlg0525.tlg001.perseus-grc2"
+
+[[commentaries.references]]
+urn = "urn:cts:greekLit:tlg0525.tlg001.perseus-eng2"
+
+[[translations]]
+name = "A Pausanias Reader in Progress"
+file = "./priv/translations/aprip-en.docx"
+urn = "urn:cts:greekLit:tlg0525.tlg001.aprip-en"
+
+[[translations.references]]
+urn = "urn:cts:greekLit:tlg0525.tlg001.perseus-grc2"

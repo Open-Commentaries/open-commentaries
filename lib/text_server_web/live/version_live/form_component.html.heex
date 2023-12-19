@@ -9,12 +9,7 @@
     phx-submit="save"
   >
     <div class="md:col-span-2 col-span-1 pt-6 px-4 sm:px-6 lg:px-8">
-      <.live_component
-        module={TextServerWeb.WorkLive.Search}
-        id={:version_work_search}
-        label="What work does this version use?"
-        selected_work={@work || nil}
-      >
+      <.live_component module={TextServerWeb.WorkLive.Search} id={:version_work_search} label="What work does this version use?" selected_work={@work || nil}>
         <:selected_work_slot :let={work}>
           <%= hidden_input(:selected_work, :work_id, value: work.id) %>
           <Components.card item={%{description: work.urn, title: work.english_title}} url="">
@@ -113,6 +108,16 @@
           </figure>
         <% end %>
       </div>
+
+      <.live_component
+        module={TextServerWeb.VersionLive.DropboxChooser}
+        id={@version.id}
+        title={"Edit #{@version.label}"}
+        action={:edit}
+        version={@version}
+        work={@version.work}
+        return_to={~p"/versions/#{@version.id}"}
+      />
     </section>
 
     <div class="mt-6 sm:col-span-1 container mx-auto px-4 sm:px-6 lg:px-8">

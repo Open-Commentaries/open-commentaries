@@ -222,6 +222,17 @@
 	margin-bottom: 0.9rem;
 }
 
+.named_entity {
+	display: inline-block;
+}
+
+.named_entity::after {
+	content: attr(data-entity-type);
+	font-size: 9pt;
+	opacity: 0.7;
+	padding-left: 4px;
+}
+
 /** Begin tei.css --- based on work by Luke Hollis and the IIP Project */
 
 /* 2023-03-22 CR editing multiple elements */
