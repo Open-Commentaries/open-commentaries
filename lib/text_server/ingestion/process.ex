@@ -19,39 +19,101 @@ defmodule TextServer.Ingestion.Process do
   end
 
   def process_versions(configs, version_type) do
+    {:ok, bert} = Bumblebee.load_model({:hf, "dslim/bert-base-NER"})
+    {:ok, tokenizer} = Bumblebee.load_tokenizer({:hf, "bert-base-cased"})
+
+    serving = Bumblebee.Text.token_classification(bert, tokenizer, aggregation: :same)
+
     configs
     |> Enum.map(fn %{"file" => file, "urn" => urn} = config ->
       version = create_version(config, version_type)
 
       parsed =
         case Path.extname(file) do
-          ".docx" -> TextServer.Ingestion.Version.parse_version(version)
+          ".docx" -> TextServer.Ingestion.Docx.parse_and_chunk(config)
           ".xml" -> "NOT YET IMPLEMENTED"
           _ -> "NOT SUPPORTED"
         end
 
       parsed
-      # |> Enum.with_index()
-      # |> Enum.map(fn {chunk, offset} ->
-      #   IO.inspect(chunk)
+      |> Enum.with_index()
+      |> Enum.map(fn {chunk, offset} ->
+        location = chunk |> List.first() |> Map.get(:attr) |> Map.get(:identifier)
 
-      #   # location = Map.get(chunk, :attr) |> Map.get(:identifier)
+        document = %Panpipe.Document{children: chunk}
+        plain_text = Panpipe.to_plain(document)
+        token_classifications = classify_tokens(serving, plain_text)
 
-      #   # if location == "" do
-      #   #   IO.inspect(chunk)
-      #   # end
+        ner_ast =
+          document
+          |> Panpipe.transform(fn
+            %Panpipe.AST.Str{string: string} = n ->
+              entity_match =
+                token_classifications
+                |> Enum.find(fn t ->
+                  String.starts_with?(t.phrase, string) or String.starts_with?(string, t.phrase)
+                end)
 
-      #   # {:ok, container} =
-      #   #   TextContainers.find_or_create_text_container(%{
-      #   #     location: location |> Enum.map(&to_string(&1)),
-      #   #     offset: offset,
-      #   #     version_id: version.id,
-      #   #     urn: urn <> ":" <> Enum.join(location, ".")
-      #   #   })
+              if entity_match do
+                {:halt,
+                 %Panpipe.AST.Span{
+                   attr: %Panpipe.AST.Attr{
+                     key_value_pairs: %{"entity" => Jason.encode!(entity_match)}
+                   },
+                   children: [n]
+                 }}
+              end
 
-      #   # create_text_nodes(container, chunk)
-      # end)
+            _ ->
+              nil
+          end)
+
+        fragments = TextServer.Ingestion.Version.collect_fragments(ner_ast)
+
+        TextServer.Ingestion.Version.serialize_fragments(
+          location |> String.split("."),
+          fragments
+        )
+        |> Enum.map(fn {location, text, elements} ->
+          {:ok, text_node} =
+            TextNodes.find_or_create_text_node(%{
+              version_id: version.id,
+              location: location,
+              text: text,
+              urn: "#{version.urn}:#{location}"
+            })
+
+          TextNodes.update_text_node(text_node, %{text: text})
+
+          _elements_and_errors = TextElements.find_or_create_text_elements(text_node, elements)
+        end)
+      end)
     end)
+  end
+
+  def classify_tokens(serving, text) do
+    Nx.Serving.run(serving, text)
+    |> Map.get(:entities)
+    |> Enum.reduce([], fn
+      entity, [] ->
+        [entity]
+
+      entity, acc ->
+        [h | rest] = acc
+
+        phrase = entity |> Map.get(:phrase)
+
+        if String.starts_with?(phrase, "##") do
+          h_phrase = h |> Map.get(:phrase)
+          joined_phrase = String.replace(phrase, "##", h_phrase)
+          new_h = %{h | phrase: joined_phrase, end: entity.end}
+
+          [new_h | rest]
+        else
+          [entity | acc]
+        end
+    end)
+    |> Enum.reverse()
   end
 
   def create_text_nodes(container, text_nodes) do
@@ -65,7 +127,6 @@ defmodule TextServer.Ingestion.Process do
       text_node_raw
       |> Map.put(:text_container_id, container.id)
       |> Map.put(:node_type, node_type)
-      |> IO.inspect()
 
       # |> TextNodes.find_or_create_text_node()
     end)

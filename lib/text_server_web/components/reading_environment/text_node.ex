@@ -91,6 +91,19 @@ defmodule TextServerWeb.ReadingEnvironment.TextNode do
         <span class={@classes} phx-click="highlight-comments" phx-value-comments={@comments}><%= @text %></span>
         """
 
+      Enum.member?(tags |> Enum.map(& &1.name), "named_entity") ->
+        assigns =
+          assign(assigns,
+            entity_type:
+              tags
+              |> Enum.find(&(&1.name == "named_entity"))
+              |> Map.get(:metadata)
+              |> Map.get(:attributes)
+              |> Map.get("label")
+          )
+
+        ~H"<span class={@classes} data-entity-type={@entity_type} title={@entity_type}><%= @text %></span>"
+
       Enum.member?(tags |> Enum.map(& &1.name), "image") ->
         assigns =
           assign(
@@ -137,6 +150,7 @@ defmodule TextServerWeb.ReadingEnvironment.TextNode do
       "emph" -> "italic"
       "image" -> "image mt-10"
       "link" -> "link font-bold underline hover:opacity-75 visited:opacity-60"
+      "named_entity" -> "named_entity rounded-sm inline-block bg-slate-200 px-1"
       "strong" -> "font-bold"
       "underline" -> "underline"
       _ -> tag.name

@@ -93,60 +93,41 @@ defmodule TextServer.Ingestion.Docx do
       )
 
     ast
-    |> Enum.with_index()
-    |> Enum.reduce(
-      %{
-        text_containers: [],
-        text_block: [],
-        text_nodes: [],
-        text_tokens: [],
-        text_decorations: [],
-        comments: []
-      },
-      &reducer/2
-    )
+    |> Panpipe.transform(&add_location_markers/1)
+    |> Map.get(:children)
+    |> Enum.reduce([[]], fn node, acc ->
+      [curr | rest] = acc
 
-    # |> Panpipe.transform(&add_location_markers/1)
-    # |> Map.get(:children)
-    # |> Enum.reduce([[]], fn node, acc ->
-    #   [curr | rest] = acc
+      case node do
+        %Panpipe.AST.Div{children: children} ->
+          [h | rest_children] = children
 
-    #   case node do
-    #     %Panpipe.AST.Div{children: children} ->
-    #       first = List.first(children)
+          # If there is a new location node, reverse the current chunk
+          # (so that the nodes are in the right order) and
+          # start a new chunk with the current node, removing the header.
+          if match?(%Panpipe.AST.Header{attr: %Panpipe.AST.Attr{identifier: _location}}, h) do
+            acc = [Enum.reverse(curr) | rest]
+            location = h |> Map.get(:attr) |> Map.get(:identifier)
 
-    #       # If there is a new location node, reverse the current chunk
-    #       # (so that the nodes are in the right order) and
-    #       # start a new chunk with the current node.
-    #       if match?(%Panpipe.AST.Header{attr: %Panpipe.AST.Attr{identifier: _location}}, first) do
-    #         acc = [Enum.reverse(curr) | rest]
+            new_node = %Panpipe.AST.Div{
+              node
+              | children: rest_children,
+                attr: %Panpipe.AST.Attr{node.attr | identifier: location}
+            }
 
-    #         [[node] | acc]
-    #       else
-    #         # Otherwise, prepend the current node to the current chunk.
-    #         [[node | curr] | rest]
-    #       end
+            [[new_node] | acc]
+          else
+            # Otherwise, prepend the current node to the current chunk.
+            [[node | curr] | rest]
+          end
 
-    #     _ ->
-    #       # Otherwise, prepend the current node to the current chunk.
-    #       [[node | curr] | rest]
-    #   end
-    # end)
-    # |> Enum.reverse()
-  end
-
-  def reducer({%Panpipe.AST.Plain{} = node, offset}, acc) do
-    current_container = acc.text_containers |> List.first()
-
-    my_text_block = %TextBlock{
-      text_container_ref: current_container.urn,
-      offset: offset,
-      type: "plain"
-    }
-  end
-
-  def reducer({node, offset}, acc) do
-    %{acc | text_nodes: [node | acc.text_nodes]}
+        _ ->
+          # Otherwise, prepend the current node to the current chunk.
+          [[node | curr] | rest]
+      end
+    end)
+    |> Enum.reverse()
+    |> Enum.reject(&(&1 == []))
   end
 
   def add_location_markers(%Panpipe.AST.Para{children: children} = n) do
@@ -156,7 +137,7 @@ defmodule TextServer.Ingestion.Docx do
       %Panpipe.AST.Str{string: string} ->
         matches = Regex.run(@location_regex, string)
 
-        if !is_nil(matches) do
+        unless is_nil(matches) do
           location =
             List.first(matches)
             |> String.replace("{", "")
@@ -172,26 +153,6 @@ defmodule TextServer.Ingestion.Docx do
 
       _ ->
         nil
-    end
-  end
-
-  def add_location_markers(%Panpipe.AST.Str{string: " "}), do: nil
-
-  def add_location_markers(%Panpipe.AST.Str{string: string} = n) do
-    location = Process.get(:current_location)
-
-    unless is_nil(location) do
-      citation_key = "#{location}:#{string}"
-
-      # Somewhat confusingly, the :halt tuple does not halt
-      # the transformation, but rather prevents it from recursing
-      # into the :children field, which is the Str node that it
-      # has just seen.
-      {:halt,
-       %Panpipe.AST.Span{
-         attr: %Panpipe.AST.Attr{key_value_pairs: %{"citation" => citation_key}},
-         children: [n]
-       }}
     end
   end
 

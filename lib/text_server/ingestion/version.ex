@@ -32,6 +32,15 @@ defmodule TextServer.Ingestion.Version do
 
   # pandoc: /app/data/user_uploads/exemplar_files/GN_A Pausanias reader in progress, restarted 2020.05.01(1)-Gipson-6-18-2022.docx
   def parse_version_docx(%Version{} = version) do
+    {:ok, bert} = Bumblebee.load_model({:hf, "dslim/bert-base-NER"})
+    {:ok, tokenizer} = Bumblebee.load_tokenizer({:hf, "bert-base-cased"})
+
+    serving =
+      Bumblebee.Text.token_classification(bert, tokenizer,
+        aggregation: :same,
+        compile: [batch_size: 4, sequence_length: 100]
+      )
+
     # `track_changes: "all"` catches comments; see example below
     {:ok, ast} =
       Panpipe.ast(
@@ -58,27 +67,64 @@ defmodule TextServer.Ingestion.Version do
 
     joined_fragments =
       located_fragments
-      |> Enum.map(fn {location, fragments} ->
+      |> Stream.map(fn {location, fragments} ->
         serialize_fragments(location, fragments)
       end)
 
-    nodes =
-      joined_fragments
-      |> Enum.map(fn {location, text, elements} ->
-        {:ok, text_node} =
-          TextNodes.find_or_create_text_node(%{
-            version_id: version.id,
-            location: location,
-            text: text,
-            urn: "#{version.urn}:#{Enum.join(location, ".")}"
-          })
+    joined_fragments
+    |> Stream.each(fn {location, text, elements} ->
+      {:ok, text_node} =
+        TextNodes.find_or_create_text_node(%{
+          version_id: version.id,
+          location: location,
+          text: text,
+          urn: "#{version.urn}:#{Enum.join(location, ".")}"
+        })
 
-        _elements_and_errors = TextElements.find_or_create_text_elements(text_node, elements)
+      elements = classify_tokens(serving, text, elements)
 
-        {:ok, text_node}
+      _elements_and_errors = TextElements.find_or_create_text_elements(text_node, elements)
+    end)
+    |> Enum.to_list()
+
+    :ok
+  end
+
+  def classify_tokens(serving, text, elements) do
+    entities =
+      Nx.Serving.run(serving, text)
+      |> Map.get(:entities)
+      |> Enum.reduce([], fn
+        entity, [] ->
+          [entity]
+
+        entity, acc ->
+          [h | rest] = acc
+
+          phrase = entity |> Map.get(:phrase)
+
+          if String.starts_with?(phrase, "##") do
+            h_phrase = h |> Map.get(:phrase)
+            joined_phrase = String.replace(phrase, "##", h_phrase)
+            new_h = %{h | phrase: joined_phrase, end: entity.end}
+
+            [new_h | rest]
+          else
+            [entity | acc]
+          end
+      end)
+      |> Enum.filter(&(Map.get(&1, :score) > 0.9))
+      |> Enum.map(fn entity ->
+        %{
+          attributes: entity,
+          content: entity.phrase,
+          end_offset: entity.end,
+          start_offset: entity.start,
+          type: :named_entity
+        }
       end)
 
-    {:ok, nodes}
+    Enum.concat(entities, elements)
   end
 
   def set_locations({:paragraph, fragments}, state) do
@@ -179,17 +225,18 @@ defmodule TextServer.Ingestion.Version do
     # errors in offsets. An assumption is made that a node that begins with
     # more than a single space character does so for a reason, so we maintain
     # that string
-    fragments =
+    {fragments, starting_offset} =
       if List.first(fragments) == {:string, " "} do
-        tl(fragments)
+        {tl(fragments), 1}
       else
-        fragments
+        {fragments, 0}
       end
 
     # Rather than using numeric offsets, why not pass in the urn and location,
     # building a URN with a subreference to the token(s) to which the element
     # is applied?
-    {text_elements, _final_offset} = fragments |> Enum.reduce({[], 0}, &tag_elements/2)
+    {text_elements, _final_offset} =
+      fragments |> Enum.reduce({[], starting_offset}, &tag_elements/2)
 
     {location, text, text_elements}
   end
@@ -253,155 +300,180 @@ defmodule TextServer.Ingestion.Version do
 
     attributes = get_comment_attributes(comment, content)
 
-    {elements ++
-       [
-         %{
-           attributes: attributes,
-           content:
-             content
-             |> String.replace(@attribution_regex, "")
-             |> String.trim_leading(),
-           end_offset: offset,
-           start_offset: offset,
-           type: :comment
-         }
-       ], offset}
+    {
+      [
+        %{
+          attributes: attributes,
+          content:
+            content
+            |> String.replace(@attribution_regex, "")
+            |> String.trim_leading(),
+          end_offset: offset,
+          start_offset: offset,
+          type: :comment
+        }
+        | elements
+      ],
+      offset
+    }
   end
 
   def tag_elements({:emph, emph}, {elements, offset}) do
     s = emph |> Enum.reduce("", &flatten_string/2)
     end_offset = offset + String.length(s)
 
-    # token = String.slice(s, offset..end_offset)
-
-    # THIS COULD HAVE ALL BEEN SO MUCH SIMPLER?
-    IO.puts("token: #{s}")
-
-    {elements ++
-       [
-         %{
-           content: s,
-           end_offset: end_offset,
-           start_offset: offset,
-           type: :emph
-         }
-       ], end_offset}
+    {
+      [
+        %{
+          content: s,
+          end_offset: end_offset,
+          start_offset: offset,
+          type: :emph
+        }
+        | elements
+      ],
+      end_offset
+    }
   end
 
   def tag_elements({:image, image}, {elements, offset}) do
     s = image |> Enum.reduce("", &flatten_string/2)
     end_offset = offset + String.length(s)
 
-    {elements ++
-       [
-         Map.merge(image, %{
-           end_offset: end_offset,
-           start_offset: offset,
-           type: :image
-         })
-       ], end_offset}
+    {
+      [
+        Map.merge(image, %{
+          end_offset: end_offset,
+          start_offset: offset,
+          type: :image
+        })
+        | elements
+      ],
+      end_offset
+    }
   end
 
   def tag_elements({:link, link, url}, {elements, offset}) do
     s = link |> Enum.reduce("", &flatten_string/2)
     end_offset = offset + String.length(s)
 
-    token = String.slice(s, offset..end_offset)
-
-    IO.puts("token: #{token}")
-
-    {elements ++
-       [
-         %{
-           content: url,
-           end_offset: end_offset,
-           start_offset: offset,
-           type: :link
-         }
-       ], end_offset}
+    {
+      [
+        %{
+          content: url,
+          end_offset: end_offset,
+          start_offset: offset,
+          type: :link
+        }
+        | elements
+      ],
+      end_offset
+    }
   end
 
   def tag_elements({:list_element, content}, {elements, offset}) do
     s = content |> Enum.reduce("", &flatten_string/2)
     end_offset = offset + String.length(s)
 
-    {elements ++
-       [
-         %{
-           content: s,
-           end_offset: end_offset,
-           start_offset: offset,
-           type: :list_element
-         }
-       ], end_offset}
+    {
+      [
+        %{
+          content: s,
+          end_offset: end_offset,
+          start_offset: offset,
+          type: :list_element
+        }
+        | elements
+      ],
+      end_offset
+    }
   end
 
   def tag_elements({:note, note}, {elements, offset}) do
-    {elements ++
-       [
-         %{
-           content: note |> Enum.reduce("", &flatten_string/2),
-           start_offset: offset,
-           type: :note
-         }
-       ], offset}
+    {
+      [
+        %{
+          content: note |> Enum.reduce("", &flatten_string/2),
+          start_offset: offset,
+          type: :note
+        }
+        | elements
+      ],
+      offset
+    }
+  end
+
+  def tag_elements({:span, span}, {elements, offset}) do
+    s = span |> Enum.reduce("", &flatten_string/2)
+    end_offset = offset + String.length(s)
+
+    {
+      [
+        %{
+          content: s,
+          attributes: Map.get(span, :attributes),
+          start_offset: offset,
+          end_offset: end_offset,
+          type: :span
+        }
+        | elements
+      ],
+      end_offset
+    }
   end
 
   def tag_elements({:strong, strong}, {elements, offset}) do
     s = strong |> Enum.reduce("", &flatten_string/2)
     end_offset = offset + String.length(s)
 
-    token = String.slice(s, offset..end_offset)
-
-    IO.puts("token: #{token}")
-
-    {elements ++
-       [
-         %{
-           content: s,
-           end_offset: end_offset,
-           start_offset: offset,
-           type: :strong
-         }
-       ], end_offset}
+    {
+      [
+        %{
+          content: s,
+          end_offset: end_offset,
+          start_offset: offset,
+          type: :strong
+        }
+        | elements
+      ],
+      end_offset
+    }
   end
 
   def tag_elements({:superscript, superscript}, {elements, offset}) do
     s = superscript |> Enum.reduce("", &flatten_string/2)
     end_offset = offset + String.length(s)
 
-    token = String.slice(s, offset..end_offset)
-
-    IO.puts("token: #{token}")
-
-    {elements ++
-       [
-         %{
-           content: s,
-           end_offset: end_offset,
-           start_offset: offset,
-           type: :superscript
-         }
-       ], end_offset}
+    {
+      [
+        %{
+          content: s,
+          end_offset: end_offset,
+          start_offset: offset,
+          type: :superscript
+        }
+        | elements
+      ],
+      end_offset
+    }
   end
 
   def tag_elements({:underline, underline}, {elements, offset}) do
     s = underline |> Enum.reduce("", &flatten_string/2)
     end_offset = offset + String.length(s)
 
-    token = String.slice(s, offset..end_offset)
-
-    IO.puts("token: #{token}")
-
-    {elements ++
-       [
-         %{
-           content: s,
-           end_offset: end_offset,
-           start_offset: offset,
-           type: :underline
-         }
-       ], end_offset}
+    {
+      [
+        %{
+          content: s,
+          end_offset: end_offset,
+          start_offset: offset,
+          type: :underline
+        }
+        | elements
+      ],
+      end_offset
+    }
   end
 
   def tag_elements(fragment, {elements, offset}) do

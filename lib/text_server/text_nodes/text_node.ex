@@ -104,22 +104,30 @@ defmodule TextServer.TextNodes.TextNode do
           cond do
             el.element_type.name == "image" && i == el.start_offset - 1 ->
               {i, g,
-               tags ++ [%Tag{name: el.element_type.name, metadata: %{src: el.content, id: el.id}}]}
+               [%Tag{name: el.element_type.name, metadata: %{src: el.content, id: el.id}} | tags]}
 
             el.element_type.name == "note" && i == el.start_offset - 1 ->
               {i, g,
-               tags ++
-                 [%Tag{name: el.element_type.name, metadata: %{content: el.content, id: el.id}}]}
+               [
+                 %Tag{name: el.element_type.name, metadata: %{content: el.content, id: el.id}}
+                 | tags
+               ]}
 
             i >= el.start_offset && i < el.end_offset ->
-              {i, g,
-               tags ++
-                 [
-                   %Tag{
-                     name: el.element_type.name,
-                     metadata: %{src: Map.get(el, :content), id: el.id}
-                   }
-                 ]}
+              tag =
+                if el.element_type.name == "named_entity" do
+                  %Tag{
+                    name: el.element_type.name,
+                    metadata: %{attributes: el.attributes, id: el.id}
+                  }
+                else
+                  %Tag{
+                    name: el.element_type.name,
+                    metadata: %{src: Map.get(el, :content), id: el.id}
+                  }
+                end
+
+              {i, g, [tag | tags]}
 
             true ->
               {i, g, tags}
