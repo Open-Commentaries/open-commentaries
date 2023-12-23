@@ -94,6 +94,11 @@ defmodule TextServerWeb.ReadingEnvironment.TextNode do
       Enum.member?(tags |> Enum.map(& &1.name), "named_entity") ->
         assigns =
           assign(assigns,
+            entity_attributes:
+              tags
+              |> Enum.find(&(&1.name == "named_entity"))
+              |> Map.get(:metadata)
+              |> Map.get(:attributes),
             entity_type:
               tags
               |> Enum.find(&(&1.name == "named_entity"))
@@ -102,7 +107,7 @@ defmodule TextServerWeb.ReadingEnvironment.TextNode do
               |> Map.get("label")
           )
 
-        ~H"<span class={@classes} data-entity-type={@entity_type} title={@entity_type}><%= @text %></span>"
+        ~H"<span class={@classes} data-entity-attributes={Jason.encode!(@entity_attributes)} data-entity-type={@entity_type} title={@entity_type}><%= @text %></span>"
 
       Enum.member?(tags |> Enum.map(& &1.name), "image") ->
         assigns =

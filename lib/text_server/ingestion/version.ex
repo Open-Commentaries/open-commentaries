@@ -38,7 +38,7 @@ defmodule TextServer.Ingestion.Version do
     serving =
       Bumblebee.Text.token_classification(bert, tokenizer,
         aggregation: :same,
-        compile: [batch_size: 4, sequence_length: 100]
+        compile: [batch_size: 4, sequence_length: 128]
       )
 
     # `track_changes: "all"` catches comments; see example below
@@ -85,7 +85,7 @@ defmodule TextServer.Ingestion.Version do
 
       _elements_and_errors = TextElements.find_or_create_text_elements(text_node, elements)
     end)
-    |> Enum.to_list()
+    |> Stream.run()
 
     :ok
   end
@@ -106,14 +106,13 @@ defmodule TextServer.Ingestion.Version do
           if String.starts_with?(phrase, "##") do
             h_phrase = h |> Map.get(:phrase)
             joined_phrase = String.replace(phrase, "##", h_phrase)
-            new_h = %{h | phrase: joined_phrase, end: entity.end}
 
+            new_h = %{h | phrase: joined_phrase, end: entity.end}
             [new_h | rest]
           else
             [entity | acc]
           end
       end)
-      |> Enum.filter(&(Map.get(&1, :score) > 0.9))
       |> Enum.map(fn entity ->
         %{
           attributes: entity,
@@ -125,6 +124,20 @@ defmodule TextServer.Ingestion.Version do
       end)
 
     Enum.concat(entities, elements)
+  end
+
+  defp correct_range(_text, _phrase, start, end_) when start < 0 do
+    {start, end_}
+  end
+
+  defp correct_range(text, phrase, start, end_) do
+    slice = String.slice(text, Range.new(start, end_ - 1))
+
+    if slice == phrase do
+      {start, end_}
+    else
+      correct_range(text, phrase, start - 1, end_ - 1)
+    end
   end
 
   def set_locations({:paragraph, fragments}, state) do
