@@ -32,14 +32,14 @@ defmodule TextServer.Ingestion.Version do
 
   # pandoc: /app/data/user_uploads/exemplar_files/GN_A Pausanias reader in progress, restarted 2020.05.01(1)-Gipson-6-18-2022.docx
   def parse_version_docx(%Version{} = version) do
-    {:ok, bert} = Bumblebee.load_model({:hf, "dslim/bert-base-NER"})
-    {:ok, tokenizer} = Bumblebee.load_tokenizer({:hf, "bert-base-cased"})
+    # {:ok, bert} = Bumblebee.load_model({:local, "priv/language_models/dslim/bert-base-NER"})
+    # {:ok, tokenizer} = Bumblebee.load_tokenizer({:local, "priv/language_models/bert-base-cased"})
 
-    serving =
-      Bumblebee.Text.token_classification(bert, tokenizer,
-        aggregation: :same,
-        compile: [batch_size: 4, sequence_length: 128]
-      )
+    # serving =
+    #   Bumblebee.Text.token_classification(bert, tokenizer,
+    #     aggregation: :same,
+    #     compile: [batch_size: 4, sequence_length: 128]
+    #   )
 
     # `track_changes: "all"` catches comments; see example below
     {:ok, ast} =
@@ -81,8 +81,6 @@ defmodule TextServer.Ingestion.Version do
           urn: "#{version.urn}:#{Enum.join(location, ".")}"
         })
 
-      elements = classify_tokens(serving, text, elements)
-
       _elements_and_errors = TextElements.find_or_create_text_elements(text_node, elements)
     end)
     |> Stream.run()
@@ -90,54 +88,37 @@ defmodule TextServer.Ingestion.Version do
     :ok
   end
 
-  def classify_tokens(serving, text, elements) do
-    entities =
-      Nx.Serving.run(serving, text)
-      |> Map.get(:entities)
-      |> Enum.reduce([], fn
-        entity, [] ->
-          [entity]
+  def classify_tokens(serving, text) do
+    Nx.Serving.run(serving, text)
+    |> Map.get(:entities)
+    |> Enum.reduce([], fn
+      entity, [] ->
+        [entity]
 
-        entity, acc ->
-          [h | rest] = acc
+      entity, acc ->
+        [h | rest] = acc
 
-          phrase = entity |> Map.get(:phrase)
+        phrase = entity |> Map.get(:phrase)
 
-          if String.starts_with?(phrase, "##") do
-            h_phrase = h |> Map.get(:phrase)
-            joined_phrase = String.replace(phrase, "##", h_phrase)
+        if String.starts_with?(phrase, "##") do
+          h_phrase = h |> Map.get(:phrase)
+          joined_phrase = String.replace(phrase, "##", h_phrase)
 
-            new_h = %{h | phrase: joined_phrase, end: entity.end}
-            [new_h | rest]
-          else
-            [entity | acc]
-          end
-      end)
-      |> Enum.map(fn entity ->
-        %{
-          attributes: entity,
-          content: entity.phrase,
-          end_offset: entity.end,
-          start_offset: entity.start,
-          type: :named_entity
-        }
-      end)
-
-    Enum.concat(entities, elements)
-  end
-
-  defp correct_range(_text, _phrase, start, end_) when start < 0 do
-    {start, end_}
-  end
-
-  defp correct_range(text, phrase, start, end_) do
-    slice = String.slice(text, Range.new(start, end_ - 1))
-
-    if slice == phrase do
-      {start, end_}
-    else
-      correct_range(text, phrase, start - 1, end_ - 1)
-    end
+          new_h = %{h | phrase: joined_phrase, end: entity.end}
+          [new_h | rest]
+        else
+          [entity | acc]
+        end
+    end)
+    |> Enum.map(fn entity ->
+      %{
+        attributes: entity,
+        content: entity.phrase,
+        end_offset: entity.end,
+        start_offset: entity.start,
+        type: :named_entity
+      }
+    end)
   end
 
   def set_locations({:paragraph, fragments}, state) do
