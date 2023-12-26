@@ -35,12 +35,6 @@ defmodule TextServer.Ingestion.Docx do
 
   @location_regex ~r/\{\d+\.\d+\.\d+\}/
 
-  # the @attribution_regex is a special case for matching
-  # old comments by Greg Nagy ("GN") that have been
-  # manually attributed. Normally, attribution will come
-  # directly from a comment's XML.
-  @attribution_regex ~r/\[\[GN\s(\d{4}\.\d{2}\.\d{2})\]\]/
-
   defmodule TextContainer do
     defstruct [:location, :urn, :offset]
   end

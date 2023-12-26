@@ -63,6 +63,15 @@ defmodule TextServer.NamedEntities do
     |> Repo.insert()
   end
 
+  def find_or_create_named_entity(attrs) do
+    case %NamedEntity{}
+         |> where([ne], ne.wikidata_id == ^attrs.wikidata_id and ne.label == ^attrs.label)
+         |> Repo.one() do
+      nil -> create_named_entity(attrs)
+      entity -> {:ok, entity}
+    end
+  end
+
   def list_entities_for_urn(%CTS.URN{} = urn) do
     references =
       from(ref in NamedEntityReference,
