@@ -33,7 +33,6 @@ defmodule TextServer.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:amqp, "~> 3.3"},
       {:bcrypt_elixir, "~> 3.0"},
       {:bumblebee, "~> 0.4.2"},
       {:data_schema, "~> 0.5.0"},
